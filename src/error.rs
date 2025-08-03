@@ -1,6 +1,9 @@
+use std::sync::PoisonError;
+
 #[derive(Debug)]
 pub enum Error {
     Unknown,
+
     #[cfg(feature = "bincode")]
     EncodeError(bincode::error::EncodeError),
     #[cfg(feature = "bincode")]
@@ -9,20 +12,27 @@ pub enum Error {
     SledError(sled::Error),
     #[cfg(feature = "sled")]
     InvalidSledKeyFormat,
+
+    // Failed to accquire a mutex lock
+    MutexError,
 }
 
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Error::Unknown => write!(f, "Unknown error"),
+
             #[cfg(feature = "bincode")]
             Error::EncodeError(e) => write!(f, "Encode error: {}", e),
             #[cfg(feature = "bincode")]
             Error::DecodeError(e) => write!(f, "Decode error: {}", e),
+
             #[cfg(feature = "sled")]
             Error::SledError(e) => write!(f, "Sled error: {}", e),
             #[cfg(feature = "sled")]
             Error::InvalidSledKeyFormat => write!(f, "Invalid key format"),
+
+            Error::MutexError => write!(f, "Failed to acquire mutex lock"),
         }
     }
 }
@@ -47,5 +57,11 @@ impl From<bincode::error::DecodeError> for Error {
 impl From<sled::Error> for Error {
     fn from(err: sled::Error) -> Self {
         Error::SledError(err)
+    }
+}
+
+impl<T> From<PoisonError<T>> for Error {
+    fn from(_: PoisonError<T>) -> Self {
+        Error::MutexError
     }
 }

@@ -1,8 +1,12 @@
-use bincode::{Decode, Encode};
-use external_buffered_stream::{create_external_buffered_stream, Error};
-use futures::{stream, StreamExt};
+use external_buffered_stream::{
+    Error,
+    bincode::{Decode, Encode},
+    create_external_buffered_stream,
+};
+use futures::{StreamExt, stream};
 use std::time::Duration;
-use tokio::{select, sync::oneshot, task::yield_now};
+use tokio::{select, sync::oneshot, task::yield_now, time::interval};
+use tokio_stream::wrappers::IntervalStream;
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
 struct NumberData {
@@ -10,8 +14,13 @@ struct NumberData {
 }
 
 fn create_number_stream() -> impl futures::Stream<Item = NumberData> {
-    let numbers: Vec<_> = (1..=10).map(|i| NumberData { value: i }).collect();
-    stream::iter(numbers)
+    let mut counter: i32 = 0;
+    IntervalStream::new(interval(Duration::from_millis(120)))
+        .take(10 as usize)
+        .map(move |_| {
+            counter += 1;
+            NumberData { value: counter }
+        })
 }
 
 async fn delay(ms: u64) {

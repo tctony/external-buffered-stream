@@ -13,15 +13,29 @@ sled = { version = "0.34", optional = true }
 tempfile = "3.0"
 tokio = { version = "1.0", features = ["full"] }
 env_logger = "0.11"
+rand = "0.9.2"
+tokio-stream = "0.1.17"
 
 [features]
 default = ["bincode", "sled"]
+full = [
+  "bincode",
+  "sled",
+  "queue",
+]
+
 bincode = ["dep:bincode"]
+
 sled = ["dep:sled"]
 queue = []
 
-[[examples]]
+[[example]]
 name = "simple"
 path = "examples/simple.rs"
 required-features = ["default"]
+
+[[example]]
+name = "queue"
+path = "examples/queue.rs"
+required-features = ["queue"]
 

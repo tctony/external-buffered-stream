@@ -2,27 +2,25 @@ mod buffer;
 mod error;
 mod serde;
 
+pub use buffer::*;
+pub use error::*;
+pub use serde::*;
+
 use std::{
     marker::PhantomData,
     pin::Pin,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll},
 };
 
-use futures::{channel::mpsc, FutureExt, SinkExt, Stream, StreamExt};
-
-// pub exports begin
-pub use buffer::*;
-pub use error::*;
-pub use serde::*;
-// pub exports end
+use futures::{FutureExt, SinkExt, Stream, StreamExt, channel::mpsc};
 
 pub struct ExternalBufferedStream<T, B, S>
 where
-    T: ExternalBufferSerde,
+    T: Send,
     B: ExternalBuffer<T>,
     S: Stream<Item = T>,
 {
@@ -34,8 +32,8 @@ where
 
 impl<T, B, S> ExternalBufferedStream<T, B, S>
 where
-    T: ExternalBufferSerde + Send,
-    B: ExternalBuffer<T> + Send + Sync + 'static,
+    T: Send,
+    B: ExternalBuffer<T> + 'static,
     S: Stream<Item = T> + Send + 'static,
 {
     pub fn new(source: S, buffer: B) -> Self {
@@ -85,8 +83,8 @@ where
 
 impl<T, B, S> Stream for ExternalBufferedStream<T, B, S>
 where
-    T: ExternalBufferSerde + Send,
-    B: ExternalBuffer<T> + Send + Sync + 'static,
+    T: Send,
+    B: ExternalBuffer<T> + 'static,
     S: Stream<Item = T> + Send + 'static,
 {
     type Item = T;
@@ -133,5 +131,19 @@ where
     Ok(ExternalBufferedStream::new(
         stream,
         ExternalBufferSled::new(path)?,
+    ))
+}
+
+#[cfg(feature = "queue")]
+pub fn create_queued_stream<T, S>(
+    stream: S,
+) -> Result<ExternalBufferedStream<T, ExternalBufferQueue<T>, S>, Error>
+where
+    T: Ord + Send + 'static,
+    S: Stream<Item = T> + Send + Sync + 'static,
+{
+    Ok(ExternalBufferedStream::new(
+        stream,
+        ExternalBufferQueue::new(),
     ))
 }
