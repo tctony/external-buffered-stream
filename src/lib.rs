@@ -4,7 +4,6 @@ mod serde;
 
 use std::{
     marker::PhantomData,
-    path::Path,
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -121,6 +120,7 @@ where
     }
 }
 
+#[cfg(feature = "default")]
 pub fn create_external_buffered_stream<T, S, P>(
     stream: S,
     path: P,
@@ -128,7 +128,7 @@ pub fn create_external_buffered_stream<T, S, P>(
 where
     T: ExternalBufferSerde + Send,
     S: Stream<Item = T> + Send + Sync + 'static,
-    P: AsRef<Path>,
+    P: AsRef<std::path::Path>,
 {
     Ok(ExternalBufferedStream::new(
         stream,
