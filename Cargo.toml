@@ -1,7 +1,13 @@
 [package]
 name = "external-buffered-stream"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
+authors = ["Tony Tang <tangchang21@gmail.com>"]
+license = "MIT"
+description = "A stream that stores pending items in a external buffer"
+keywords = ["stream", "buffer", "sled", "queue"]
+categories = ["development-tools"]
+repository = "https://github.com/tctony/external-buffered-stream"
 
 [dependencies]
 bincode = { version = "2.0.1", optional = true }
