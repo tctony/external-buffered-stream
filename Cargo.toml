@@ -35,6 +35,11 @@ path = "examples/simple.rs"
 required-features = ["default"]
 
 [[example]]
+name = "slow_source"
+path = "examples/slow_source.rs"
+required-features = ["default"]
+
+[[example]]
 name = "queue"
 path = "examples/queue.rs"
 required-features = ["queue"]

@@ -1,33 +1,32 @@
-use external_buffered_stream::create_queued_stream;
-use futures::StreamExt;
-use rand::seq::SliceRandom;
 use std::time::Duration;
+
+use external_buffered_stream::{
+    bincode::{Decode, Encode},
+    create_external_buffered_stream,
+};
+use futures::stream::StreamExt;
 use tokio::time::interval;
 use tokio_stream::wrappers::IntervalStream;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Encode, Decode)]
 struct NumberData {
     value: i32,
 }
 
 fn create_number_stream() -> impl futures::Stream<Item = NumberData> {
-    let mut rng = rand::rng();
-    let mut numbers: Vec<i32> = (1..=10).collect();
-    numbers.shuffle(&mut rng);
-    log::info!("numbers: {:?}", numbers);
-    let numbers: Vec<_> = numbers
+    let numbers: Vec<_> = (1..=10)
+        .collect::<Vec<_>>()
         .into_iter()
         .map(|i| NumberData { value: i })
         .collect();
 
     let mut counter: i32 = 0;
-    IntervalStream::new(interval(Duration::from_millis(120)))
+    IntervalStream::new(interval(Duration::from_millis(300)))
         .take(10 as usize)
         .map(move |_| {
             counter += 1;
-            let data = &numbers[(counter - 1) as usize];
-            log::info!("produce {}", data.value);
-            data.clone()
+            log::info!("produce {}", counter - 1);
+            numbers[(counter - 1) as usize].clone()
         })
 }
 
@@ -43,12 +42,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .try_init();
 
     let number_stream = create_number_stream();
-    let mut buffered_stream = create_queued_stream(number_stream)?;
+
+    let buffer_dir = tempfile::Builder::new()
+        .prefix("external-buffered-stream")
+        .tempdir()
+        .unwrap();
+    let buffer_path = buffer_dir.path().to_string_lossy().to_string();
+
+    let mut buffered_stream = create_external_buffered_stream(number_stream, buffer_path)?;
 
     while let Some(data) = buffered_stream.next().await {
         log::info!("did process {}", data.value);
 
-        delay(500).await;
+        delay(200).await;
     }
 
     drop(buffered_stream);
