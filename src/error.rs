@@ -2,7 +2,7 @@ use std::sync::PoisonError;
 
 #[derive(Debug)]
 pub enum Error {
-    Unknown,
+    Custom(Box<dyn std::error::Error + Send + Sync>),
 
     #[cfg(feature = "bincode")]
     EncodeError(bincode::error::EncodeError),
@@ -20,7 +20,7 @@ pub enum Error {
 impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Error::Unknown => write!(f, "Unknown error"),
+            Error::Custom(inner) => write!(f, "Custom error: {}", inner),
 
             #[cfg(feature = "bincode")]
             Error::EncodeError(e) => write!(f, "Encode error: {}", e),
