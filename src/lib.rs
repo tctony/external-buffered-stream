@@ -1,6 +1,7 @@
 mod buffer;
 mod error;
 mod serde;
+mod runtime;
 
 pub use buffer::*;
 pub use error::*;
@@ -47,30 +48,29 @@ where
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = stop_flag.clone();
 
-        std::thread::spawn(move || {
-            futures::executor::block_on(async move {
-                let mut source = source;
-                let mut notify_tx = notify_tx;
-                while let Some(item) = source.next().await {
-                    match buffer_clone.push(item).await {
-                        Ok(()) => match notify_tx.send(()).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                log::error!("Failed to notify: {:?}", e);
-                                break;
-                            }
-                        },
+        let handle_source = async move {
+            let mut source = source;
+            let mut notify_tx = notify_tx;
+            while let Some(item) = source.next().await {
+                match buffer_clone.push(item).await {
+                    Ok(()) => match notify_tx.send(()).await {
+                        Ok(_) => {}
                         Err(e) => {
-                            log::error!("Failed to push item to buffer: {:?}", e);
+                            log::error!("Failed to notify: {:?}", e);
                             break;
                         }
+                    },
+                    Err(e) => {
+                        log::error!("Failed to push item to buffer: {:?}", e);
+                        break;
                     }
                 }
-                log::info!("Source stream is ended");
-                stop_flag_clone.store(true, Ordering::SeqCst);
-                _ = notify_tx.send(())
-            })
-        });
+            }
+            log::info!("Source stream is ended");
+            stop_flag_clone.store(true, Ordering::SeqCst);
+            _ = notify_tx.send(())
+        };
+        runtime::spawn(handle_source);
 
         ExternalBufferedStream {
             buffer,

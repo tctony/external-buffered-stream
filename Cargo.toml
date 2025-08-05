@@ -15,6 +15,7 @@ bincode = { version = "2.0.1", optional = true }
 futures = "0.3.31"
 log = "0.4.27"
 sled = { version = "0.34", optional = true }
+tokio = { version = "1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
@@ -29,12 +30,15 @@ full = [
   "bincode",
   "sled",
   "queue",
+  "rt-tokio"
 ]
 
 bincode = ["dep:bincode"]
 
 sled = ["dep:sled"]
 queue = []
+
+rt-tokio = ["tokio/rt"]
 
 [[example]]
 name = "simple"
