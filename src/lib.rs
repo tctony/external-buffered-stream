@@ -1,7 +1,7 @@
 mod buffer;
 mod error;
-mod serde;
 mod runtime;
+mod serde;
 
 pub use buffer::*;
 pub use error::*;
@@ -11,13 +11,13 @@ use std::{
     marker::PhantomData,
     pin::Pin,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     task::{Context, Poll},
 };
 
-use futures::{FutureExt, SinkExt, Stream, StreamExt, channel::mpsc};
+use futures::{channel::mpsc, Future, SinkExt, Stream, StreamExt};
 
 pub struct ExternalBufferedStream<T, B, S>
 where
@@ -29,6 +29,9 @@ where
     _source: PhantomData<S>,
     notify: mpsc::UnboundedReceiver<()>,
     stop_flag: Arc<AtomicBool>,
+
+    // the pending future that be polled by the stream consumer
+    pending: Option<Pin<Box<dyn Future<Output = Result<Option<T>, Error>> + Send>>>,
 }
 
 impl<T, B, S> ExternalBufferedStream<T, B, S>
@@ -66,7 +69,7 @@ where
                     }
                 }
             }
-            log::info!("Source stream is ended");
+            log::info!("Source of external buffer stream is ended.");
             stop_flag_clone.store(true, Ordering::SeqCst);
             _ = notify_tx.send(())
         };
@@ -77,6 +80,7 @@ where
             _source: PhantomData,
             notify: notify_rx,
             stop_flag,
+            pending: None,
         }
     }
 }
@@ -89,32 +93,46 @@ where
 {
     type Item = T;
 
-    fn poll_next(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // S is PhantomData, so here is safe to get mut
         let this = unsafe { self.get_unchecked_mut() };
 
         loop {
-            match this.buffer.shift().poll_unpin(ctx) {
-                Poll::Ready(next) => match next {
-                    Ok(Some(item)) => return Poll::Ready(Some(item)),
-                    Ok(None) => {
-                        let mut wait = (&mut this.notify).next();
-                        match wait.poll_unpin(ctx) {
-                            Poll::Ready(_) => {
-                                if this.stop_flag.load(Ordering::SeqCst) {
-                                    break Poll::Ready(None);
-                                } else {
-                                    continue;
-                                }
+            if this.stop_flag.load(Ordering::SeqCst) {
+                return Poll::Ready(None);
+            }
+
+            if let Some(pending) = this.pending.as_mut() {
+                match pending.as_mut().poll(cx) {
+                    Poll::Ready(result) => {
+                        this.pending = None;
+
+                        match result {
+                            Ok(Some(item)) => {
+                                return Poll::Ready(Some(item));
                             }
-                            Poll::Pending => return Poll::Pending,
+                            Ok(None) => {
+                                // fall through to wait notify
+                            }
+                            Err(err) => {
+                                log::error!("external buffer shift return error: {}", err);
+                                return Poll::Ready(None);
+                            }
                         }
                     }
-                    Err(err) => {
-                        log::error!("poll external buffer error: {}", err);
-                        return Poll::Ready(None);
+                    Poll::Pending => {
+                        return Poll::Pending;
                     }
-                },
+                }
+            }
+
+            match (&mut this.notify).poll_next_unpin(cx) {
+                Poll::Ready(Some(_)) => {
+                    let buffer = this.buffer.clone();
+                    this.pending = Some(Box::pin(async move { buffer.shift().await }));
+                    continue;
+                }
+                Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => return Poll::Pending,
             }
         }
