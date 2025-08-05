@@ -39,6 +39,22 @@ impl core::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+pub fn make_custom_error(err: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::Custom(Box::new(err))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_custom_error;
+
+    #[test]
+    fn test_custom_error_display() {
+        let error = std::io::Error::new(std::io::ErrorKind::Other, "Test error");
+        let err = make_custom_error(error);
+        assert_eq!(format!("{}", err), "Custom error: Test error");
+    }
+}
+
 #[cfg(feature = "bincode")]
 impl From<bincode::error::EncodeError> for Error {
     fn from(err: bincode::error::EncodeError) -> Self {
