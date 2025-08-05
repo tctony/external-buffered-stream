@@ -10,6 +10,7 @@ categories = ["development-tools"]
 repository = "https://github.com/tctony/external-buffered-stream"
 
 [dependencies]
+async-trait = "0.1.88"
 bincode = { version = "2.0.1", optional = true }
 futures = "0.3.31"
 log = "0.4.27"

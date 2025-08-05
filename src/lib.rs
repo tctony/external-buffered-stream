@@ -52,7 +52,7 @@ where
                 let mut source = source;
                 let mut notify_tx = notify_tx;
                 while let Some(item) = source.next().await {
-                    match buffer_clone.push(item) {
+                    match buffer_clone.push(item).await {
                         Ok(()) => match notify_tx.send(()).await {
                             Ok(_) => {}
                             Err(e) => {
@@ -89,30 +89,33 @@ where
 {
     type Item = T;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // S is PhantomData, so here is safe to get mut
         let this = unsafe { self.get_unchecked_mut() };
 
         loop {
-            match this.buffer.shift() {
-                Ok(Some(item)) => return Poll::Ready(Some(item)),
-                Ok(None) => {
-                    let mut wait = (&mut this.notify).next();
-                    match wait.poll_unpin(cx) {
-                        Poll::Ready(_) => {
-                            if this.stop_flag.load(Ordering::SeqCst) {
-                                break Poll::Ready(None);
-                            } else {
-                                continue;
+            match this.buffer.shift().poll_unpin(ctx) {
+                Poll::Ready(next) => match next {
+                    Ok(Some(item)) => return Poll::Ready(Some(item)),
+                    Ok(None) => {
+                        let mut wait = (&mut this.notify).next();
+                        match wait.poll_unpin(ctx) {
+                            Poll::Ready(_) => {
+                                if this.stop_flag.load(Ordering::SeqCst) {
+                                    break Poll::Ready(None);
+                                } else {
+                                    continue;
+                                }
                             }
+                            Poll::Pending => return Poll::Pending,
                         }
-                        Poll::Pending => return Poll::Pending,
                     }
-                }
-                Err(err) => {
-                    log::error!("poll external buffer error: {}", err);
-                    return Poll::Ready(None);
-                }
+                    Err(err) => {
+                        log::error!("poll external buffer error: {}", err);
+                        return Poll::Ready(None);
+                    }
+                },
+                Poll::Pending => return Poll::Pending,
             }
         }
     }
@@ -124,7 +127,7 @@ pub fn create_external_buffered_stream<T, S, P>(
     path: P,
 ) -> Result<ExternalBufferedStream<T, ExternalBufferSled, S>, Error>
 where
-    T: ExternalBufferSerde + Send,
+    T: ExternalBufferSerde + Send + 'static,
     S: Stream<Item = T> + Send + Sync + 'static,
     P: AsRef<std::path::Path>,
 {

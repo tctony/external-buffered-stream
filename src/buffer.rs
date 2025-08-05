@@ -15,8 +15,9 @@ use crate::Error;
 ///     for data.
 ///   - even with a in memory buffer, we can still implement a priority
 ///     queue for push and shift actions.
+#[async_trait::async_trait]
 pub trait ExternalBuffer<T: Sized>: Send + Sync {
-    fn push(&self, item: T) -> Result<(), Error>; // to end of buffer
+    async fn push(&self, item: T) -> Result<(), Error>; // to end of buffer
 
-    fn shift(&self) -> Result<Option<T>, Error>; // from head of buffer
+    async fn shift(&self) -> Result<Option<T>, Error>; // from head of buffer
 }

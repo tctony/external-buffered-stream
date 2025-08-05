@@ -56,8 +56,9 @@ impl ExternalBufferSled {
     }
 }
 
-impl<T: ExternalBufferSerde> ExternalBuffer<T> for ExternalBufferSled {
-    fn push(&self, item: T) -> Result<(), Error> {
+#[async_trait::async_trait]
+impl<T: ExternalBufferSerde + Send + 'static> ExternalBuffer<T> for ExternalBufferSled {
+    async fn push(&self, item: T) -> Result<(), Error> {
         let serialized = item.into_external_buffer()?;
         let key = self.tail_counter.fetch_add(1, Ordering::SeqCst);
         let key_bytes = Self::key_from_u64(key);
@@ -66,7 +67,7 @@ impl<T: ExternalBufferSerde> ExternalBuffer<T> for ExternalBufferSled {
         Ok(())
     }
 
-    fn shift(&self) -> Result<Option<T>, Error> {
+    async fn shift(&self) -> Result<Option<T>, Error> {
         loop {
             let current_head = self.head_counter.load(Ordering::SeqCst);
             let current_tail = self.tail_counter.load(Ordering::SeqCst);
@@ -110,8 +111,8 @@ mod tests {
         name: String,
     }
 
-    #[test]
-    fn test_push_and_shift() {
+    #[tokio::test]
+    async fn test_push_and_shift() {
         let temp_dir = TempDir::new().unwrap();
         let buffer = ExternalBufferSled::new(temp_dir.path().join("test_db")).unwrap();
 
@@ -125,33 +126,33 @@ mod tests {
         };
 
         // Push items
-        buffer.push(item1.clone()).unwrap();
-        buffer.push(item2.clone()).unwrap();
+        buffer.push(item1.clone()).await.unwrap();
+        buffer.push(item2.clone()).await.unwrap();
 
         // Shift items (should come out in FIFO order)
-        let shifted1 = buffer.shift().unwrap();
+        let shifted1 = buffer.shift().await.unwrap();
         assert_eq!(shifted1, Some(item1));
 
-        let shifted2 = buffer.shift().unwrap();
+        let shifted2 = buffer.shift().await.unwrap();
         assert_eq!(shifted2, Some(item2));
 
         // Buffer should be empty now
-        let shifted3: Option<TestItem> = buffer.shift().unwrap();
+        let shifted3: Option<TestItem> = buffer.shift().await.unwrap();
         assert_eq!(shifted3, None);
     }
 
-    #[test]
-    fn test_empty_buffer() {
+    #[tokio::test]
+    async fn test_empty_buffer() {
         let temp_dir = TempDir::new().unwrap();
         let buffer = ExternalBufferSled::new(temp_dir.path().join("empty_db")).unwrap();
 
         // Empty buffer should return None
-        let result: Option<TestItem> = buffer.shift().unwrap();
+        let result: Option<TestItem> = buffer.shift().await.unwrap();
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_persistence() {
+    #[tokio::test]
+    async fn test_persistence() {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("persistent_db");
 
@@ -163,19 +164,19 @@ mod tests {
         // Create buffer, push item, and drop it
         {
             let buffer = ExternalBufferSled::new(&db_path).unwrap();
-            buffer.push(item.clone()).unwrap();
+            buffer.push(item.clone()).await.unwrap();
         }
 
         // Create new buffer with same path and verify item is still there
         {
             let buffer = ExternalBufferSled::new(&db_path).unwrap();
-            let retrieved = buffer.shift().unwrap();
+            let retrieved = buffer.shift().await.unwrap();
             assert_eq!(retrieved, Some(item));
         }
     }
 
-    #[test]
-    fn test_multiple_pushes_and_shifts() {
+    #[tokio::test]
+    async fn test_multiple_pushes_and_shifts() {
         let temp_dir = TempDir::new().unwrap();
         let buffer = ExternalBufferSled::new(temp_dir.path().join("multi_db")).unwrap();
 
@@ -188,22 +189,22 @@ mod tests {
 
         // Push all items
         for item in &items {
-            buffer.push(item.clone()).unwrap();
+            buffer.push(item.clone()).await.unwrap();
         }
 
         // Shift all items and verify order
         for expected_item in &items {
-            let shifted = buffer.shift().unwrap();
+            let shifted = buffer.shift().await.unwrap();
             assert_eq!(shifted, Some(expected_item.clone()));
         }
 
         // Buffer should be empty
-        let result: Option<TestItem> = buffer.shift().unwrap();
+        let result: Option<TestItem> = buffer.shift().await.unwrap();
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_interleaved_push_and_shift() {
+    #[tokio::test]
+    async fn test_interleaved_push_and_shift() {
         let temp_dir = TempDir::new().unwrap();
         let buffer = ExternalBufferSled::new(temp_dir.path().join("interleaved_db")).unwrap();
 
@@ -221,22 +222,22 @@ mod tests {
         };
 
         // Push one, shift one
-        buffer.push(item1.clone()).unwrap();
-        let shifted1 = buffer.shift().unwrap();
+        buffer.push(item1.clone()).await.unwrap();
+        let shifted1 = buffer.shift().await.unwrap();
         assert_eq!(shifted1, Some(item1));
 
         // Push two, shift two
-        buffer.push(item2.clone()).unwrap();
-        buffer.push(item3.clone()).unwrap();
+        buffer.push(item2.clone()).await.unwrap();
+        buffer.push(item3.clone()).await.unwrap();
 
-        let shifted2 = buffer.shift().unwrap();
+        let shifted2 = buffer.shift().await.unwrap();
         assert_eq!(shifted2, Some(item2));
 
-        let shifted3 = buffer.shift().unwrap();
+        let shifted3 = buffer.shift().await.unwrap();
         assert_eq!(shifted3, Some(item3));
 
         // Should be empty
-        let result: Option<TestItem> = buffer.shift().unwrap();
+        let result: Option<TestItem> = buffer.shift().await.unwrap();
         assert_eq!(result, None);
     }
 }

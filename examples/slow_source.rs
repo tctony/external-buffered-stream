@@ -25,7 +25,7 @@ fn create_number_stream() -> impl futures::Stream<Item = NumberData> {
         .take(10 as usize)
         .map(move |_| {
             counter += 1;
-            log::info!("produce {}", counter - 1);
+            log::info!("produce {}", counter);
             numbers[(counter - 1) as usize].clone()
         })
 }

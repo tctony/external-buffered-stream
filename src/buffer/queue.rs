@@ -18,14 +18,15 @@ impl<T: Ord> ExternalBufferQueue<T> {
     }
 }
 
+#[async_trait::async_trait]
 impl<T: Ord + Send> ExternalBuffer<T> for ExternalBufferQueue<T> {
-    fn push(&self, item: T) -> Result<(), Error> {
+    async fn push(&self, item: T) -> Result<(), Error> {
         let mut queue = self.queue.lock()?;
         queue.push(item);
         Ok(())
     }
 
-    fn shift(&self) -> Result<Option<T>, Error> {
+    async fn shift(&self) -> Result<Option<T>, Error> {
         let mut queue = self.queue.lock()?;
         Ok(queue.pop())
     }
@@ -52,23 +53,23 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_new_queue_is_empty() {
+    #[tokio::test]
+    async fn test_new_queue_is_empty() {
         let buffer = ExternalBufferQueue::<i32>::new();
-        assert!(buffer.shift().unwrap().is_none());
+        assert!(buffer.shift().await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_push_and_shift_single_item() {
+    #[tokio::test]
+    async fn test_push_and_shift_single_item() {
         let buffer = ExternalBufferQueue::new();
 
-        buffer.push(42).unwrap();
-        assert_eq!(buffer.shift().unwrap(), Some(42));
-        assert!(buffer.shift().unwrap().is_none());
+        buffer.push(42).await.unwrap();
+        assert_eq!(buffer.shift().await.unwrap(), Some(42));
+        assert!(buffer.shift().await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_push_and_shift_multiple_items() {
+    #[tokio::test]
+    async fn test_push_and_shift_multiple_items() {
         let buffer = ExternalBufferQueue::new();
 
         let item1 = TestItem::new(1, 1, "low priority");
@@ -76,29 +77,29 @@ mod tests {
         let item3 = TestItem::new(3, 3, "medium priority");
 
         // Push items
-        buffer.push(item1.clone()).unwrap();
-        buffer.push(item2.clone()).unwrap();
-        buffer.push(item3.clone()).unwrap();
+        buffer.push(item1.clone()).await.unwrap();
+        buffer.push(item2.clone()).await.unwrap();
+        buffer.push(item3.clone()).await.unwrap();
 
         // Should get items in max-heap order (highest priority first)
-        assert_eq!(buffer.shift().unwrap(), Some(item2)); // priority 5
-        assert_eq!(buffer.shift().unwrap(), Some(item3)); // priority 3
-        assert_eq!(buffer.shift().unwrap(), Some(item1)); // priority 1
-        assert!(buffer.shift().unwrap().is_none());
+        assert_eq!(buffer.shift().await.unwrap(), Some(item2)); // priority 5
+        assert_eq!(buffer.shift().await.unwrap(), Some(item3)); // priority 3
+        assert_eq!(buffer.shift().await.unwrap(), Some(item1)); // priority 1
+        assert!(buffer.shift().await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_max_heap_behavior() {
+    #[tokio::test]
+    async fn test_max_heap_behavior() {
         let buffer = ExternalBufferQueue::new();
 
         // Push numbers in arbitrary order
         let numbers = vec![3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
         for num in &numbers {
-            buffer.push(*num).unwrap();
+            buffer.push(*num).await.unwrap();
         }
 
         let mut result = Vec::new();
-        while let Some(item) = buffer.shift().unwrap() {
+        while let Some(item) = buffer.shift().await.unwrap() {
             result.push(item);
         }
 
@@ -108,39 +109,39 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-    #[test]
-    fn test_interleaved_push_and_shift() {
+    #[tokio::test]
+    async fn test_interleaved_push_and_shift() {
         let buffer = ExternalBufferQueue::new();
 
-        buffer.push(3).unwrap();
-        buffer.push(1).unwrap();
-        assert_eq!(buffer.shift().unwrap(), Some(3)); // Max so far
+        buffer.push(3).await.unwrap();
+        buffer.push(1).await.unwrap();
+        assert_eq!(buffer.shift().await.unwrap(), Some(3)); // Max so far
 
-        buffer.push(4).unwrap();
-        buffer.push(2).unwrap();
-        assert_eq!(buffer.shift().unwrap(), Some(4)); // New max
-        assert_eq!(buffer.shift().unwrap(), Some(2));
-        assert_eq!(buffer.shift().unwrap(), Some(1));
-        assert!(buffer.shift().unwrap().is_none());
+        buffer.push(4).await.unwrap();
+        buffer.push(2).await.unwrap();
+        assert_eq!(buffer.shift().await.unwrap(), Some(4)); // New max
+        assert_eq!(buffer.shift().await.unwrap(), Some(2));
+        assert_eq!(buffer.shift().await.unwrap(), Some(1));
+        assert!(buffer.shift().await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_same_priority_items() {
+    #[tokio::test]
+    async fn test_same_priority_items() {
         let buffer = ExternalBufferQueue::new();
 
         let item1 = TestItem::new(5, 1, "first");
         let item2 = TestItem::new(5, 2, "second");
         let item3 = TestItem::new(5, 3, "third");
 
-        buffer.push(item1.clone()).unwrap();
-        buffer.push(item2.clone()).unwrap();
-        buffer.push(item3.clone()).unwrap();
+        buffer.push(item1.clone()).await.unwrap();
+        buffer.push(item2.clone()).await.unwrap();
+        buffer.push(item3.clone()).await.unwrap();
 
         // All have same priority, but different ids
         // Order should be determined by the secondary field (id)
-        let first = buffer.shift().unwrap().unwrap();
-        let second = buffer.shift().unwrap().unwrap();
-        let third = buffer.shift().unwrap().unwrap();
+        let first = buffer.shift().await.unwrap().unwrap();
+        let second = buffer.shift().await.unwrap().unwrap();
+        let third = buffer.shift().await.unwrap().unwrap();
 
         assert_eq!(first.priority, 5);
         assert_eq!(second.priority, 5);
@@ -151,20 +152,20 @@ mod tests {
         assert!(second >= third);
     }
 
-    #[test]
-    fn test_thread_safety() {
+    #[tokio::test]
+    async fn test_thread_safety() {
         use std::sync::Arc;
-        use std::thread;
+        use tokio::task;
 
         let buffer = Arc::new(ExternalBufferQueue::new());
         let mut handles = vec![];
 
-        // Spawn multiple threads to push items
+        // Spawn multiple async tasks to push items
         for i in 0..10 {
             let buffer_clone = Arc::clone(&buffer);
-            let handle = thread::spawn(move || {
+            let handle = task::spawn(async move {
                 for j in 0..10 {
-                    buffer_clone.push(i * 10 + j).unwrap();
+                    buffer_clone.push(i * 10 + j).await.unwrap();
                 }
             });
             handles.push(handle);
@@ -172,12 +173,12 @@ mod tests {
 
         // Wait for all pushes to complete
         for handle in handles {
-            handle.join().unwrap();
+            handle.await.unwrap();
         }
 
         // Collect all items
         let mut items = Vec::new();
-        while let Some(item) = buffer.shift().unwrap() {
+        while let Some(item) = buffer.shift().await.unwrap() {
             items.push(item);
         }
 
@@ -190,32 +191,32 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_large_dataset() {
+    #[tokio::test]
+    async fn test_large_dataset() {
         let buffer = ExternalBufferQueue::new();
 
         // Push a large number of items
         let n = 1000;
         for i in 0..n {
-            buffer.push(i).unwrap();
+            buffer.push(i).await.unwrap();
         }
 
         // Verify all items come out in correct order
         for expected in (0..n).rev() {
-            assert_eq!(buffer.shift().unwrap(), Some(expected));
+            assert_eq!(buffer.shift().await.unwrap(), Some(expected));
         }
 
-        assert!(buffer.shift().unwrap().is_none());
+        assert!(buffer.shift().await.unwrap().is_none());
     }
 
-    #[test]
-    fn test_error_handling_with_poisoned_mutex() {
+    #[tokio::test]
+    async fn test_error_handling_with_poisoned_mutex() {
         use std::panic;
         use std::sync::Arc;
         use std::thread;
 
         let buffer = Arc::new(ExternalBufferQueue::new());
-        buffer.push(1).unwrap(); // Add an item first
+        buffer.push(1).await.unwrap(); // Add an item first
 
         let buffer_clone = Arc::clone(&buffer);
 
@@ -229,7 +230,7 @@ mod tests {
         assert!(handle.join().is_err());
 
         // Now trying to use the buffer should return an error
-        assert!(buffer.push(2).is_err());
-        assert!(buffer.shift().is_err());
+        assert!(buffer.push(2).await.is_err());
+        assert!(buffer.shift().await.is_err());
     }
 }
