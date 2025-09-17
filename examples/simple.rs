@@ -1,11 +1,10 @@
 use external_buffered_stream::{
-    Error,
     bincode::{Decode, Encode},
-    create_external_buffered_stream,
+    create_external_buffered_stream, Error,
 };
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 use std::time::Duration;
-use tokio::{select, sync::oneshot, task::yield_now, time::interval};
+use tokio::time::{interval, timeout};
 use tokio_stream::wrappers::IntervalStream;
 
 #[derive(Debug, Clone, PartialEq, Encode, Decode)]
@@ -41,37 +40,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
     let buffer_path = buffer_dir.path().to_string_lossy().to_string();
 
-    let (stop_tx, stop_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
-        let number_stream = create_number_stream();
-        let mut buffered_stream = create_external_buffered_stream(number_stream, buffer_path)?;
+        timeout(Duration::from_secs(3), async move {
+            let number_stream = create_number_stream();
+            let mut buffered_stream = create_external_buffered_stream(number_stream, buffer_path)?;
 
-        while let Some(data) = buffered_stream.next().await {
-            log::info!("did process {}", data.value);
+            while let Some(data) = buffered_stream.next().await {
+                log::info!("flow1 did process {}", data.value);
 
-            delay(500).await;
-        }
+                delay(500).await;
+            }
 
-        drop(buffered_stream);
-        log::info!("process stopped because of timeout"); // why this line is after process 10
+            drop(buffered_stream);
+            log::info!("flow1 stopped");
 
-        let _ = stop_tx.send(());
-
-        Ok::<(), Error>(())
+            Ok::<(), Error>(())
+        })
+        .await
     });
-
-    select! {
-        _ = handle => {
-            unreachable!()
-        },
-        _ = delay(3000) => {
-            log::info!("timeout");
-        }
-    };
-
-    yield_now().await;
-
-    let _ = stop_rx.await;
+    match handle.await? {
+        Ok(Ok(_)) => log::info!("flow1 finished"),
+        Ok(Err(err)) => log::error!("flow1 error: {}", err),
+        Err(elpased) => log::info!("flow1 timeout: {}", elpased),
+    }
 
     let buffer_path = buffer_dir.path().to_string_lossy().to_string();
     let result = tokio::spawn(async move {
@@ -79,14 +70,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut new_buffered_stream = create_external_buffered_stream(empty_stream, buffer_path)?;
 
         while let Some(data) = new_buffered_stream.next().await {
-            log::info!("did process {}", data.value,);
+            log::info!("flow2 did process {}", data.value,);
 
             delay(500).await;
         }
         Ok::<(), Error>(())
     })
     .await;
-    log::info!("{:?}", result);
+
+    log::info!("result of flow2: {:?}", result);
 
     Ok(())
 }

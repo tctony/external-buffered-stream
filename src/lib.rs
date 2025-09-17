@@ -10,10 +10,7 @@ pub use serde::*;
 use std::{
     marker::PhantomData,
     pin::Pin,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -28,7 +25,6 @@ where
     buffer: Arc<B>,
     _source: PhantomData<S>,
     notify: mpsc::UnboundedReceiver<()>,
-    stop_flag: Arc<AtomicBool>,
 
     // the pending future that be polled by the stream consumer
     pending: Option<Pin<Box<dyn Future<Output = Result<Option<T>, Error>> + Send>>>,
@@ -47,9 +43,6 @@ where
         let buffer_clone = buffer.clone();
 
         let (notify_tx, notify_rx) = mpsc::unbounded::<()>();
-
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_flag_clone = stop_flag.clone();
 
         let handle_source = async move {
             let mut source = source;
@@ -70,8 +63,6 @@ where
                 }
             }
             log::info!("Source of external buffer stream is ended.");
-            stop_flag_clone.store(true, Ordering::SeqCst);
-            _ = notify_tx.send(())
         };
         runtime::spawn(handle_source);
 
@@ -79,7 +70,6 @@ where
             buffer,
             _source: PhantomData,
             notify: notify_rx,
-            stop_flag,
             pending: None,
         }
     }
@@ -98,8 +88,9 @@ where
         let this = unsafe { self.get_unchecked_mut() };
 
         loop {
-            if this.stop_flag.load(Ordering::SeqCst) {
-                return Poll::Ready(None);
+            if this.pending.is_none() {
+                let buffer = this.buffer.clone();
+                this.pending = Some(Box::pin(async move { buffer.shift().await }));
             }
 
             if let Some(pending) = this.pending.as_mut() {
@@ -112,7 +103,26 @@ where
                                 return Poll::Ready(Some(item));
                             }
                             Ok(None) => {
-                                // fall through to wait notify
+                                let mut has_new = false;
+                                let is_end = loop {
+                                    // wait notify and consume all
+                                    match (&mut this.notify).poll_next_unpin(cx) {
+                                        Poll::Ready(Some(_)) => {
+                                            has_new = true;
+                                            // 消费所有通知
+                                            continue;
+                                        }
+                                        Poll::Ready(None) => break true,
+                                        Poll::Pending => break false,
+                                    }
+                                };
+                                if has_new {
+                                    continue;
+                                } else if is_end {
+                                    return Poll::Ready(None);
+                                } else {
+                                    return Poll::Pending;
+                                }
                             }
                             Err(err) => {
                                 log::error!("external buffer shift return error: {}", err);
@@ -124,16 +134,6 @@ where
                         return Poll::Pending;
                     }
                 }
-            }
-
-            match (&mut this.notify).poll_next_unpin(cx) {
-                Poll::Ready(Some(_)) => {
-                    let buffer = this.buffer.clone();
-                    this.pending = Some(Box::pin(async move { buffer.shift().await }));
-                    continue;
-                }
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Pending,
             }
         }
     }
